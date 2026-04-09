@@ -1,0 +1,626 @@
+import { useState, useEffect } from 'react';
+import { Users, TrendingUp, Plus, Edit2, Trash2, Check, Settings, FolderOpen } from 'lucide-react';
+import type { Grupo, Alumno, Pago, ConfiguracionMonto } from './types';
+import { MESES } from './types';
+
+const App = () => {
+  const [vistaActual, setVistaActual] = useState('dashboard');
+  const [grupos, setGrupos] = useState<Grupo[]>([]);
+  const [alumnos, setAlumnos] = useState<Alumno[]>([]);
+  const [pagos, setPagos] = useState<Pago[]>([]);
+  const [montos, setMontos] = useState<ConfiguracionMonto[]>([]);
+  const [grupoSeleccionado, setGrupoSeleccionado] = useState<number | null>(null);
+  const [editandoMontos, setEditandoMontos] = useState(false);
+  const [anioActual] = useState(2026);
+
+  // Cargar datos iniciales
+  useEffect(() => {
+    cargarDatos();
+  }, []);
+
+  const cargarDatos = async () => {
+    try {
+      const [gruposData, alumnosData, pagosData, montosData] = await Promise.all([
+        window.electronAPI.getGrupos(),
+        window.electronAPI.getAlumnos(),
+        window.electronAPI.getPagos(),
+        window.electronAPI.getMontos(anioActual)
+      ]);
+
+      setGrupos(gruposData);
+      setAlumnos(alumnosData);
+      setPagos(pagosData);
+      setMontos(montosData);
+
+      if (gruposData.length > 0 && !grupoSeleccionado) {
+        setGrupoSeleccionado(gruposData[0].id);
+      }
+    } catch (error) {
+      console.error('Error al cargar datos:', error);
+    }
+  };
+
+  const alumnosPorGrupo = alumnos.filter(a => a.grupo_id === grupoSeleccionado);
+
+  const tienePago = (alumnoId: number, mes: string): boolean => {
+    return pagos.some(p => p.alumno_id === alumnoId && p.mes === mes && p.anio === anioActual);
+  };
+
+  const togglePago = async (alumnoId: number, mes: string) => {
+    try {
+      const pagoExistente = pagos.find(p => p.alumno_id === alumnoId && p.mes === mes && p.anio === anioActual);
+
+      if (pagoExistente) {
+        // Desmarcar pago
+        await window.electronAPI.deletePago(pagoExistente.id);
+        setPagos(pagos.filter(p => p.id !== pagoExistente.id));
+      } else {
+        // Marcar pago
+        const montoMes = montos.find(m => m.mes === mes)?.monto || 5000;
+        const nuevoPago = await window.electronAPI.createPago({
+          alumno_id: alumnoId,
+          mes,
+          anio: anioActual,
+          monto: montoMes
+        });
+        setPagos([...pagos, nuevoPago]);
+
+        // Generar comprobante PDF
+        await window.electronAPI.generarComprobante(nuevoPago.id);
+      }
+    } catch (error) {
+      console.error('Error al registrar pago:', error);
+      alert('Error al registrar el pago');
+    }
+  };
+
+  const getMontoPorMes = (mes: string): number => {
+    return montos.find(m => m.mes === mes)?.monto || 5000;
+  };
+
+  const calcularEstadisticas = () => {
+    const totalAlumnos = alumnos.filter(a => a.activo === 1).length;
+    const pagosMesActual = pagos.filter(p => p.mes === 'Marzo' && p.anio === anioActual).length;
+    const totalRecaudado = pagos.filter(p => p.anio === anioActual).reduce((sum, p) => sum + p.monto, 0);
+    return { totalAlumnos, pagosMesActual, totalRecaudado };
+  };
+
+  const stats = calcularEstadisticas();
+
+  // ===== COMPONENTES DE VISTAS =====
+
+  const Dashboard = () => (
+    <div className="space-y-6">
+      <h1 className="text-3xl font-bold text-gray-800">Dashboard</h1>
+      
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="bg-blue-50 p-6 rounded-lg border border-blue-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-blue-600 font-medium">Total Alumnos</p>
+              <p className="text-3xl font-bold text-blue-900">{stats.totalAlumnos}</p>
+            </div>
+            <Users className="w-12 h-12 text-blue-400" />
+          </div>
+        </div>
+
+        <div className="bg-green-50 p-6 rounded-lg border border-green-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-green-600 font-medium">Pagos Marzo</p>
+              <p className="text-3xl font-bold text-green-900">{stats.pagosMesActual}</p>
+            </div>
+            <Check className="w-12 h-12 text-green-400" />
+          </div>
+        </div>
+
+        <div className="bg-purple-50 p-6 rounded-lg border border-purple-200">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm text-purple-600 font-medium">Total Recaudado {anioActual}</p>
+              <p className="text-3xl font-bold text-purple-900">${stats.totalRecaudado.toLocaleString('es-AR')}</p>
+            </div>
+            <TrendingUp className="w-12 h-12 text-purple-400" />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white p-6 rounded-lg border border-gray-200">
+        <h2 className="text-xl font-semibold mb-4">Resumen por Grupo</h2>
+        {grupos.map(grupo => {
+          const alumnosGrupo = alumnos.filter(a => a.grupo_id === grupo.id && a.activo === 1);
+          const pagosGrupo = pagos.filter(p => alumnosGrupo.some(a => a.id === p.alumno_id) && p.anio === anioActual);
+          return (
+            <div key={grupo.id} className="flex justify-between items-center py-3 border-b last:border-0">
+              <span className="font-medium">{grupo.nombre}</span>
+              <div className="flex gap-4">
+                <span className="text-sm text-gray-600">{alumnosGrupo.length} alumnos</span>
+                <span className="text-sm text-green-600 font-medium">{pagosGrupo.length} pagos</span>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+
+  const VistaGrupos = () => {
+    const [nuevoGrupo, setNuevoGrupo] = useState('');
+    const [mostrarForm, setMostrarForm] = useState(false);
+
+    const crearGrupo = async () => {
+      if (!nuevoGrupo.trim()) return;
+      try {
+        const grupo = await window.electronAPI.createGrupo(nuevoGrupo);
+        setGrupos([...grupos, grupo]);
+        setNuevoGrupo('');
+        setMostrarForm(false);
+      } catch (error) {
+        console.error('Error al crear grupo:', error);
+      }
+    };
+
+    const eliminarGrupo = async (id: number) => {
+      if (confirm('¿Estás seguro de desactivar este grupo?')) {
+        try {
+          await window.electronAPI.deleteGrupo(id);
+          setGrupos(grupos.filter(g => g.id !== id));
+        } catch (error) {
+          console.error('Error al eliminar grupo:', error);
+        }
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-gray-800">Grupos</h1>
+          <button 
+            onClick={() => setMostrarForm(!mostrarForm)}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          >
+            <Plus className="w-5 h-5" /> Nuevo Grupo
+          </button>
+        </div>
+
+        {mostrarForm && (
+          <div className="bg-white p-6 rounded-lg border border-gray-200">
+            <h3 className="text-lg font-semibold mb-4">Crear Nuevo Grupo</h3>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={nuevoGrupo}
+                onChange={(e) => setNuevoGrupo(e.target.value)}
+                placeholder="Nombre del grupo"
+                className="flex-1 px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                onKeyPress={(e) => e.key === 'Enter' && crearGrupo()}
+              />
+              <button onClick={crearGrupo} className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">
+                Guardar
+              </button>
+              <button onClick={() => setMostrarForm(false)} className="bg-gray-300 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-400">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+          {grupos.map(grupo => (
+            <div key={grupo.id} className="bg-white p-6 rounded-lg border border-gray-200">
+              <div className="flex justify-between items-start mb-4">
+                <h3 className="text-xl font-semibold">{grupo.nombre}</h3>
+                <button 
+                  onClick={() => eliminarGrupo(grupo.id)}
+                  className="text-gray-500 hover:text-red-600"
+                >
+                  <Trash2 className="w-4 h-4" />
+                </button>
+              </div>
+              <p className="text-gray-600">{alumnos.filter(a => a.grupo_id === grupo.id && a.activo === 1).length} alumnos</p>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  const VistaAlumnos = () => {
+    const [mostrarForm, setMostrarForm] = useState(false);
+    const [formData, setFormData] = useState({ nombre_completo: '', telefono: '', grupo_id: grupos[0]?.id || 0 });
+
+    const crearAlumno = async () => {
+      if (!formData.nombre_completo.trim()) return;
+      try {
+        const alumno = await window.electronAPI.createAlumno(formData);
+        setAlumnos([...alumnos, alumno]);
+        setFormData({ nombre_completo: '', telefono: '', grupo_id: grupos[0]?.id || 0 });
+        setMostrarForm(false);
+      } catch (error) {
+        console.error('Error al crear alumno:', error);
+      }
+    };
+
+    const eliminarAlumno = async (id: number) => {
+      if (confirm('¿Estás seguro de desactivar este alumno?')) {
+        try {
+          await window.electronAPI.deleteAlumno(id);
+          setAlumnos(alumnos.filter(a => a.id !== id));
+        } catch (error) {
+          console.error('Error al eliminar alumno:', error);
+        }
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-gray-800">Alumnos</h1>
+          <button 
+            onClick={() => setMostrarForm(!mostrarForm)}
+            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+          >
+            <Plus className="w-5 h-5" /> Nuevo Alumno
+          </button>
+        </div>
+
+        {mostrarForm && (
+          <div className="bg-white p-6 rounded-lg border border-gray-200">
+            <h3 className="text-lg font-semibold mb-4">Crear Nuevo Alumno</h3>
+            <div className="grid grid-cols-3 gap-4 mb-4">
+              <input
+                type="text"
+                value={formData.nombre_completo}
+                onChange={(e) => setFormData({...formData, nombre_completo: e.target.value})}
+                placeholder="Nombre completo"
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <input
+                type="text"
+                value={formData.telefono}
+                onChange={(e) => setFormData({...formData, telefono: e.target.value})}
+                placeholder="Teléfono"
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              />
+              <select
+                value={formData.grupo_id}
+                onChange={(e) => setFormData({...formData, grupo_id: Number(e.target.value)})}
+                className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                {grupos.map(g => (
+                  <option key={g.id} value={g.id}>{g.nombre}</option>
+                ))}
+              </select>
+            </div>
+            <div className="flex gap-2">
+              <button onClick={crearAlumno} className="bg-green-600 text-white px-6 py-2 rounded-lg hover:bg-green-700">
+                Guardar
+              </button>
+              <button onClick={() => setMostrarForm(false)} className="bg-gray-300 text-gray-700 px-6 py-2 rounded-lg hover:bg-gray-400">
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
+
+        <div className="bg-white rounded-lg border border-gray-200 overflow-hidden">
+          <table className="w-full">
+            <thead className="bg-gray-50">
+              <tr>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Nombre</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Grupo</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Teléfono</th>
+                <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Pagos</th>
+                <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700">Acciones</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-gray-200">
+              {alumnos.filter(a => a.activo === 1).map(alumno => {
+                const grupo = grupos.find(g => g.id === alumno.grupo_id);
+                const cantPagos = pagos.filter(p => p.alumno_id === alumno.id && p.anio === anioActual).length;
+                return (
+                  <tr key={alumno.id} className="hover:bg-gray-50">
+                    <td className="px-6 py-4 text-sm">{alumno.nombre_completo}</td>
+                    <td className="px-6 py-4 text-sm">{grupo?.nombre}</td>
+                    <td className="px-6 py-4 text-sm text-gray-600">{alumno.telefono}</td>
+                    <td className="px-6 py-4 text-sm">
+                      <span className="bg-green-100 text-green-800 px-2 py-1 rounded-full text-xs">
+                        {cantPagos}/9 meses
+                      </span>
+                    </td>
+                    <td className="px-6 py-4 text-sm text-right">
+                      <button 
+                        onClick={() => eliminarAlumno(alumno.id)}
+                        className="text-red-600 hover:text-red-800"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    );
+  };
+
+  const Planilla = () => (
+    <div className="space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-3xl font-bold text-gray-800">Planilla de Pagos {anioActual}</h1>
+        <select 
+          value={grupoSeleccionado || ''}
+          onChange={(e) => setGrupoSeleccionado(Number(e.target.value))}
+          className="px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+        >
+          {grupos.map(g => (
+            <option key={g.id} value={g.id}>{g.nombre}</option>
+          ))}
+        </select>
+      </div>
+
+      <div className="bg-white rounded-lg border border-gray-200 overflow-x-auto">
+        <table className="w-full">
+          <thead className="bg-gray-50">
+            <tr>
+              <th className="px-4 py-3 text-left text-sm font-semibold text-gray-700 sticky left-0 bg-gray-50 min-w-[200px]">
+                Alumno
+              </th>
+              {MESES.map(mes => (
+                <th key={mes} className="px-4 py-3 text-center text-sm font-semibold text-gray-700 min-w-[80px]">
+                  <div>{mes}</div>
+                  <div className="text-xs font-normal text-gray-500">${getMontoPorMes(mes).toLocaleString('es-AR')}</div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-200">
+            {alumnosPorGrupo.map(alumno => (
+              <tr key={alumno.id} className="hover:bg-gray-50">
+                <td className="px-4 py-3 text-sm font-medium sticky left-0 bg-white">
+                  {alumno.nombre_completo}
+                </td>
+                {MESES.map(mes => {
+                  const pagado = tienePago(alumno.id, mes);
+                  return (
+                    <td key={mes} className="px-4 py-3 text-center">
+                      <button
+                        onClick={() => togglePago(alumno.id, mes)}
+                        className={`w-10 h-10 rounded-lg flex items-center justify-center font-bold transition-colors ${
+                          pagado 
+                            ? 'bg-green-500 text-white hover:bg-green-600' 
+                            : 'bg-gray-100 text-gray-400 hover:bg-gray-200'
+                        }`}
+                        title={pagado ? 'Click para desmarcar pago' : 'Click para marcar pago y generar comprobante'}
+                      >
+                        {pagado ? 'P' : '-'}
+                      </button>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="bg-blue-50 p-4 rounded-lg border border-blue-200">
+        <p className="text-sm text-blue-800">
+          <strong>📄 Comprobantes automáticos:</strong> Al marcar un pago, se genera y guarda automáticamente el comprobante PDF.
+        </p>
+      </div>
+    </div>
+  );
+
+  const Configuracion = () => {
+    const [montosEditables, setMontosEditables] = useState<{ [key: string]: number }>({});
+
+    useEffect(() => {
+      const montosObj: { [key: string]: number } = {};
+      montos.forEach(m => {
+        montosObj[m.mes] = m.monto;
+      });
+      setMontosEditables(montosObj);
+    }, [montos]);
+
+    const guardarMontos = async () => {
+      try {
+        for (const mes of MESES) {
+          if (montosEditables[mes] !== undefined) {
+            await window.electronAPI.updateMonto(mes, anioActual, montosEditables[mes]);
+          }
+        }
+        await cargarDatos();
+        setEditandoMontos(false);
+        alert('Montos actualizados correctamente');
+      } catch (error) {
+        console.error('Error al guardar montos:', error);
+        alert('Error al guardar montos');
+      }
+    };
+
+    return (
+      <div className="space-y-6">
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-gray-800">Configuración de Montos</h1>
+          {!editandoMontos ? (
+            <button 
+              onClick={() => setEditandoMontos(true)}
+              className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700"
+            >
+              <Edit2 className="w-5 h-5" /> Editar Montos
+            </button>
+          ) : (
+            <button 
+              onClick={guardarMontos}
+              className="flex items-center gap-2 bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700"
+            >
+              <Check className="w-5 h-5" /> Guardar Cambios
+            </button>
+          )}
+        </div>
+
+        <div className="bg-white p-6 rounded-lg border border-gray-200">
+          <h2 className="text-lg font-semibold mb-4 text-gray-700">Monto de Cuota por Mes - Año {anioActual}</h2>
+          <p className="text-sm text-gray-600 mb-6">
+            Configure el monto de la cuota mensual para cada mes del año. Estos montos se aplicarán 
+            automáticamente cuando marque pagos en la planilla.
+          </p>
+          
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {MESES.map(mes => (
+              <div key={mes} className="bg-gray-50 p-4 rounded-lg border border-gray-200">
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {mes}
+                </label>
+                {editandoMontos ? (
+                  <input
+                    type="number"
+                    value={montosEditables[mes] || 0}
+                    onChange={(e) => setMontosEditables({
+                      ...montosEditables,
+                      [mes]: Number(e.target.value)
+                    })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    min="0"
+                    step="100"
+                  />
+                ) : (
+                  <div className="text-2xl font-bold text-gray-800">
+                    ${montosEditables[mes]?.toLocaleString('es-AR') || '0'}
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg border border-gray-200">
+          <h2 className="text-lg font-semibold mb-4 text-gray-700">Carpeta de Comprobantes</h2>
+          <p className="text-sm text-gray-600 mb-4">
+            Los comprobantes PDF se guardan automáticamente en una carpeta del sistema.
+          </p>
+          <button
+            onClick={() => window.electronAPI.abrirCarpetaComprobantes()}
+            className="flex items-center gap-2 bg-gray-600 text-white px-4 py-2 rounded-lg hover:bg-gray-700"
+          >
+            <FolderOpen className="w-5 h-5" /> Abrir Carpeta de Comprobantes
+          </button>
+        </div>
+
+        <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
+          <p className="text-sm text-yellow-800">
+            <strong>⚠️ Importante:</strong> Los cambios en los montos solo afectarán a los nuevos pagos que se registren. 
+            Los pagos ya registrados mantendrán el monto con el que fueron creados.
+          </p>
+        </div>
+      </div>
+    );
+  };
+
+  const Reportes = () => {
+    const deudoresPorGrupo = grupos.map(grupo => {
+      const alumnosGrupo = alumnos.filter(a => a.grupo_id === grupo.id && a.activo === 1);
+      const deudores = alumnosGrupo.filter(alumno => {
+        const pagosMeses = pagos.filter(p => p.alumno_id === alumno.id && p.anio === anioActual).length;
+        return pagosMeses < 9;
+      });
+      return { grupo, deudores };
+    });
+
+    return (
+      <div className="space-y-6">
+        <h1 className="text-3xl font-bold text-gray-800">Reportes</h1>
+
+        <div className="bg-white p-6 rounded-lg border border-gray-200">
+          <div className="flex justify-between items-center mb-4">
+            <h2 className="text-xl font-semibold">Balance Mensual {anioActual}</h2>
+          </div>
+          
+          <div className="grid grid-cols-3 gap-4 mb-6">
+            {MESES.slice(0, 9).map(mes => {
+              const pagosMes = pagos.filter(p => p.mes === mes && p.anio === anioActual);
+              const totalMes = pagosMes.reduce((sum, p) => sum + p.monto, 0);
+              return (
+                <div key={mes} className="bg-gray-50 p-4 rounded-lg">
+                  <p className="text-sm text-gray-600 mb-1">{mes}</p>
+                  <p className="text-2xl font-bold text-gray-800">${totalMes.toLocaleString('es-AR')}</p>
+                  <p className="text-xs text-gray-500">{pagosMes.length} pagos</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-white p-6 rounded-lg border border-gray-200">
+          <h2 className="text-xl font-semibold mb-4">Deudores por Grupo</h2>
+          {deudoresPorGrupo.map(({ grupo, deudores }) => (
+            <div key={grupo.id} className="mb-4 last:mb-0">
+              <h3 className="font-medium text-gray-700 mb-2">{grupo.nombre}</h3>
+              {deudores.length > 0 ? (
+                <ul className="space-y-1 ml-4">
+                  {deudores.map(alumno => {
+                    const mesesPagados = pagos.filter(p => p.alumno_id === alumno.id && p.anio === anioActual).length;
+                    return (
+                      <li key={alumno.id} className="text-sm text-gray-600">
+                        • {alumno.nombre_completo} - {mesesPagados}/9 meses pagados
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : (
+                <p className="text-sm text-green-600 ml-4">✓ Todos al día</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
+  // ===== RENDERIZADO PRINCIPAL =====
+
+  return (
+    <div className="min-h-screen bg-gray-100">
+      <nav className="bg-white shadow-sm border-b border-gray-200">
+        <div className="max-w-7xl mx-auto px-4">
+          <div className="flex justify-between items-center h-16">
+            <h1 className="text-xl font-bold text-gray-800">Sistema Pagos Cooperadora</h1>
+            <div className="flex gap-1">
+              {['dashboard', 'grupos', 'alumnos', 'planilla', 'reportes', 'configuracion'].map(vista => (
+                <button
+                  key={vista}
+                  onClick={() => setVistaActual(vista)}
+                  className={`px-4 py-2 rounded-lg transition-colors capitalize ${
+                    vistaActual === vista 
+                      ? 'bg-blue-100 text-blue-700 font-medium' 
+                      : 'text-gray-600 hover:bg-gray-100'
+                  }`}
+                >
+                  {vista === 'configuracion' ? (
+                    <span className="flex items-center gap-1">
+                      <Settings className="w-4 h-4" /> Config
+                    </span>
+                  ) : vista}
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <main className="max-w-7xl mx-auto px-4 py-8">
+        {vistaActual === 'dashboard' && <Dashboard />}
+        {vistaActual === 'grupos' && <VistaGrupos />}
+        {vistaActual === 'alumnos' && <VistaAlumnos />}
+        {vistaActual === 'planilla' && <Planilla />}
+        {vistaActual === 'reportes' && <Reportes />}
+        {vistaActual === 'configuracion' && <Configuracion />}
+      </main>
+    </div>
+  );
+};
+
+export default App;

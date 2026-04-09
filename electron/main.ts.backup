@@ -1,0 +1,209 @@
+import { app, BrowserWindow, ipcMain, shell } from 'electron';
+import path from 'path';
+import { initDatabase, getDatabase, closeDatabase } from './database/db';
+
+let mainWindow: BrowserWindow | null = null;
+
+const createWindow = () => {
+  mainWindow = new BrowserWindow({
+    width: 1400,
+    height: 900,
+    minWidth: 1000,
+    minHeight: 700,
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'),
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+    icon: path.join(__dirname, '../public/assets/icon.png'),
+  });
+
+  // En desarrollo carga desde Vite, en producción desde archivos compilados
+  if (process.env.NODE_ENV === 'development') {
+    mainWindow.loadURL('http://localhost:5173');
+    mainWindow.webContents.openDevTools(); // Abre las herramientas de desarrollo
+  } else {
+    mainWindow.loadFile(path.join(__dirname, '../dist/index.html'));
+  }
+
+  mainWindow.on('closed', () => {
+    mainWindow = null;
+  });
+};
+
+// Inicializar la app
+app.whenReady().then(() => {
+  initDatabase();
+  createWindow();
+  setupIpcHandlers();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  closeDatabase();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});
+
+// ========== IPC HANDLERS ==========
+
+const setupIpcHandlers = () => {
+  const db = getDatabase();
+
+  // ===== GRUPOS =====
+  ipcMain.handle('get-grupos', () => {
+    return db.prepare('SELECT * FROM grupos WHERE activo = 1 ORDER BY nombre').all();
+  });
+
+  ipcMain.handle('create-grupo', (_event, nombre: string) => {
+    const stmt = db.prepare('INSERT INTO grupos (nombre) VALUES (?)');
+    const result = stmt.run(nombre);
+    return { id: result.lastInsertRowid, nombre, activo: 1 };
+  });
+
+  ipcMain.handle('update-grupo', (_event, id: number, nombre: string) => {
+    const stmt = db.prepare('UPDATE grupos SET nombre = ? WHERE id = ?');
+    stmt.run(nombre, id);
+    return { id, nombre };
+  });
+
+  ipcMain.handle('delete-grupo', (_event, id: number) => {
+    // Soft delete
+    const stmt = db.prepare('UPDATE grupos SET activo = 0 WHERE id = ?');
+    stmt.run(id);
+    return { success: true };
+  });
+
+  // ===== ALUMNOS =====
+  ipcMain.handle('get-alumnos', () => {
+    return db.prepare(`
+      SELECT a.*, g.nombre as grupo_nombre 
+      FROM alumnos a 
+      LEFT JOIN grupos g ON a.grupo_id = g.id 
+      WHERE a.activo = 1 
+      ORDER BY a.nombre_completo
+    `).all();
+  });
+
+  ipcMain.handle('get-alumnos-by-grupo', (_event, grupoId: number) => {
+    return db.prepare('SELECT * FROM alumnos WHERE grupo_id = ? AND activo = 1 ORDER BY nombre_completo').all(grupoId);
+  });
+
+  ipcMain.handle('create-alumno', (_event, data: any) => {
+    const stmt = db.prepare('INSERT INTO alumnos (nombre_completo, telefono, grupo_id) VALUES (?, ?, ?)');
+    const result = stmt.run(data.nombre_completo, data.telefono, data.grupo_id);
+    return { id: result.lastInsertRowid, ...data, activo: 1 };
+  });
+
+  ipcMain.handle('update-alumno', (_event, id: number, data: any) => {
+    const stmt = db.prepare('UPDATE alumnos SET nombre_completo = ?, telefono = ?, grupo_id = ? WHERE id = ?');
+    stmt.run(data.nombre_completo, data.telefono, data.grupo_id, id);
+    return { id, ...data };
+  });
+
+  ipcMain.handle('delete-alumno', (_event, id: number) => {
+    // Soft delete
+    const stmt = db.prepare('UPDATE alumnos SET activo = 0 WHERE id = ?');
+    stmt.run(id);
+    return { success: true };
+  });
+
+  // ===== PAGOS =====
+  ipcMain.handle('get-pagos', () => {
+    return db.prepare(`
+      SELECT p.*, a.nombre_completo as alumno_nombre, a.grupo_id 
+      FROM pagos p 
+      LEFT JOIN alumnos a ON p.alumno_id = a.id 
+      ORDER BY p.fecha_pago DESC
+    `).all();
+  });
+
+  ipcMain.handle('get-pagos-by-alumno', (_event, alumnoId: number) => {
+    return db.prepare('SELECT * FROM pagos WHERE alumno_id = ? ORDER BY anio, mes').all(alumnoId);
+  });
+
+  ipcMain.handle('create-pago', (_event, data: any) => {
+    // Obtener el último número de comprobante
+    const config = db.prepare('SELECT valor FROM configuracion WHERE clave = ?').get('ultimo_numero_comprobante') as { valor: string };
+    const nuevoNumero = parseInt(config.valor) + 1;
+    
+    // Actualizar el número de comprobante
+    db.prepare('UPDATE configuracion SET valor = ? WHERE clave = ?').run(nuevoNumero.toString(), 'ultimo_numero_comprobante');
+    
+    // Insertar el pago
+    const stmt = db.prepare(`
+      INSERT INTO pagos (alumno_id, mes, anio, monto, numero_comprobante) 
+      VALUES (?, ?, ?, ?, ?)
+    `);
+    const result = stmt.run(data.alumno_id, data.mes, data.anio, data.monto, nuevoNumero);
+    
+    return { 
+      id: result.lastInsertRowid, 
+      ...data, 
+      numero_comprobante: nuevoNumero,
+      fecha_pago: new Date().toISOString()
+    };
+  });
+
+  ipcMain.handle('delete-pago', (_event, id: number) => {
+    const stmt = db.prepare('DELETE FROM pagos WHERE id = ?');
+    stmt.run(id);
+    return { success: true };
+  });
+
+  ipcMain.handle('marcar-enviado', (_event, id: number) => {
+    const stmt = db.prepare('UPDATE pagos SET enviado = 1 WHERE id = ?');
+    stmt.run(id);
+    return { success: true };
+  });
+
+  // ===== CONFIGURACIÓN DE MONTOS =====
+  ipcMain.handle('get-montos', (_event, anio: number) => {
+    return db.prepare('SELECT * FROM configuracion_montos WHERE anio = ? ORDER BY mes').all(anio);
+  });
+
+  ipcMain.handle('update-monto', (_event, mes: string, anio: number, monto: number) => {
+    const stmt = db.prepare(`
+      INSERT INTO configuracion_montos (mes, anio, monto) 
+      VALUES (?, ?, ?) 
+      ON CONFLICT(mes, anio) DO UPDATE SET monto = ?, fecha_modificacion = CURRENT_TIMESTAMP
+    `);
+    stmt.run(mes, anio, monto, monto);
+    return { mes, anio, monto };
+  });
+
+  // ===== CONFIGURACIÓN GENERAL =====
+  ipcMain.handle('get-config', (_event, clave: string) => {
+    const result = db.prepare('SELECT valor FROM configuracion WHERE clave = ?').get(clave) as { valor: string } | undefined;
+    return result?.valor ?? null;
+  });
+
+  ipcMain.handle('set-config', (_event, clave: string, valor: string) => {
+    const stmt = db.prepare(`
+      INSERT INTO configuracion (clave, valor) 
+      VALUES (?, ?) 
+      ON CONFLICT(clave) DO UPDATE SET valor = ?
+    `);
+    stmt.run(clave, valor, valor);
+    return { clave, valor };
+  });
+
+  // ===== GENERACIÓN DE PDFs =====
+  ipcMain.handle('generar-comprobante', async (_event, pagoId: number) => {
+    // TODO: Implementar generación de PDF (próximo paso)
+    console.log('Generar comprobante para pago ID:', pagoId);
+    return { success: true, message: 'Función pendiente de implementar' };
+  });
+
+  ipcMain.handle('abrir-carpeta-comprobantes', () => {
+    const userDataPath = app.getPath('userData');
+    const comprobantesPath = path.join(userDataPath, 'Comprobantes');
+    shell.openPath(comprobantesPath);
+  });
+};
