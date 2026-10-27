@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { FolderOpen, Check, Users } from 'lucide-react';
+import { FolderOpen, Check, Users, Archive } from 'lucide-react';
 import { MESES } from '../types';
 import FiltrosBusqueda from '../components/ui/FiltrosBusqueda';
 import { normalizar } from '../utils/validaciones';
@@ -10,7 +10,7 @@ type Props = Pick<AppContext,
   | 'grupos'
   | 'alumnos'
   | 'familias'
-  | 'anioActual'
+  | 'anioSeleccionado'
   | 'generandoPDF'
   | 'getPago'
   | 'getMontoPorMes'
@@ -21,7 +21,7 @@ const Planilla = ({
   grupos,
   alumnos,
   familias,
-  anioActual,
+  anioSeleccionado,
   generandoPDF,
   getPago,
   getMontoPorMes,
@@ -47,18 +47,37 @@ const Planilla = ({
     return acc + filtrarAlumnos(alumnos.filter(a => a.grupo_id === g.id && a.activo === 1)).length;
   }, 0);
 
+  const abrirCarpetaAnio = () => {
+    window.electronAPI.abrirCarpetaComprobantes(anioSeleccionado);
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex justify-between items-center">
-        <h1 className="text-3xl font-bold text-gray-800">Planilla de Pagos {anioActual}</h1>
-        <button
-          onClick={() => window.electronAPI.abrirCarpetaComprobantes()}
-          className="flex items-center gap-2 px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
-        >
-          <FolderOpen className="w-4 h-4" /> Ver comprobantes
-        </button>
+        <h1 className="text-3xl font-bold text-gray-800">
+          Planilla de Pagos {anioSeleccionado}
+        </h1>
+        <div className="flex gap-2">
+          {/* Botón carpeta del año — para archivar o mover los PDF */}
+          <button
+            onClick={abrirCarpetaAnio}
+            className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 text-sm font-medium"
+            title={`Abrir carpeta de comprobantes ${anioSeleccionado}`}
+          >
+            <Archive className="w-4 h-4" />
+            Carpeta {anioSeleccionado}
+          </button>
+          {/* Botón carpeta general */}
+          <button
+            onClick={() => window.electronAPI.abrirCarpetaComprobantes()}
+            className="flex items-center gap-2 px-3 py-2 bg-purple-100 text-purple-700 rounded-lg hover:bg-purple-200 text-sm font-medium"
+          >
+            <FolderOpen className="w-4 h-4" /> Ver comprobantes
+          </button>
+        </div>
       </div>
 
+      {/* Filtro por categoría */}
       <div className="flex items-center gap-2 flex-wrap">
         <span className="text-sm text-gray-500 font-medium">Categoría:</span>
         <button
@@ -82,6 +101,7 @@ const Planilla = ({
         ))}
       </div>
 
+      {/* Búsqueda y filtro por letra */}
       <div className="bg-white p-4 rounded-lg border border-gray-200">
         <FiltrosBusqueda
           busqueda={busqueda}
@@ -98,6 +118,7 @@ const Planilla = ({
         </p>
       )}
 
+      {/* Tablas por grupo */}
       {gruposFiltrados.map(grupo => {
         const alumnosGrupo   = alumnos.filter(a => a.grupo_id === grupo.id && a.activo === 1);
         const alumnosMostrar = filtrarAlumnos(alumnosGrupo);
@@ -203,7 +224,7 @@ const Planilla = ({
                               {pagado && (
                                 <button
                                   onClick={() =>
-                                    window.electronAPI.abrirCarpetaPago(grupo.nombre, anioActual, mes)
+                                    window.electronAPI.abrirCarpetaPago(grupo.nombre, anioSeleccionado, mes)
                                   }
                                   className="mt-1 text-xs text-[#34477f] hover:text-[#2a3a6b] hover:underline"
                                   title={`Abrir carpeta del comprobante de ${mes}`}

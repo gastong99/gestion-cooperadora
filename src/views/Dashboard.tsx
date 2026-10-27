@@ -5,16 +5,20 @@ type Props = Pick<AppContext,
   | 'grupos'
   | 'alumnos'
   | 'pagos'
-  | 'anioActual'
+  | 'anioSeleccionado'
   | 'calcularEstadisticas'
 >;
 
-const Dashboard = ({ grupos, alumnos, pagos, anioActual, calcularEstadisticas }: Props) => {
+const Dashboard = ({ grupos, alumnos, pagos, anioSeleccionado, calcularEstadisticas }: Props) => {
   const stats = calcularEstadisticas();
 
   return (
     <div className="space-y-6">
-      <h1 className="text-3xl font-bold text-gray-800">Panel Principal</h1>
+      <h1 className="text-3xl font-bold text-gray-800">
+        Panel Principal
+        {' '}
+        <span className="text-xl font-normal text-gray-400">{anioSeleccionado}</span>
+      </h1>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-[#f0f3fa] p-6 rounded-lg border border-[#c0cae8]">
@@ -58,7 +62,7 @@ const Dashboard = ({ grupos, alumnos, pagos, anioActual, calcularEstadisticas }:
         <div className="bg-purple-50 p-6 rounded-lg border border-purple-200">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-purple-600 font-medium">Total Recaudado {anioActual}</p>
+              <p className="text-sm text-purple-600 font-medium">Total Recaudado {anioSeleccionado}</p>
               <p className="text-3xl font-bold text-purple-900">
                 ${stats.totalRecaudado.toLocaleString('es-AR')}
               </p>
@@ -73,7 +77,7 @@ const Dashboard = ({ grupos, alumnos, pagos, anioActual, calcularEstadisticas }:
         {grupos.map(grupo => {
           const alumnosGrupo = alumnos.filter(a => a.grupo_id === grupo.id && a.activo === 1);
           const pagosGrupo   = pagos.filter(p =>
-            alumnosGrupo.some(a => a.id === p.alumno_id) && p.anio === anioActual
+            alumnosGrupo.some(a => a.id === p.alumno_id) && p.anio === anioSeleccionado
           );
           return (
             <div key={grupo.id} className="flex justify-between items-center py-2 border-b last:border-0">

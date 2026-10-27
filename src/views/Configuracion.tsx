@@ -5,7 +5,7 @@ import type { AppContext } from '../hooks/useApp';
 
 type Props = Pick<AppContext,
   | 'montos'
-  | 'anioActual'
+  | 'anioSeleccionado'
   | 'editandoMontos'
   | 'setEditandoMontos'
   | 'cargarDatos'
@@ -14,7 +14,7 @@ type Props = Pick<AppContext,
 
 const Configuracion = ({
   montos,
-  anioActual,
+  anioSeleccionado,
   editandoMontos,
   setEditandoMontos,
   cargarDatos,
@@ -32,7 +32,7 @@ const Configuracion = ({
     try {
       for (const mes of MESES) {
         if (montosEditables[mes] !== undefined) {
-          await window.electronAPI.updateMonto(mes, anioActual, montosEditables[mes]);
+          await window.electronAPI.updateMonto(mes, anioSeleccionado, montosEditables[mes]);
         }
       }
       await cargarDatos();
@@ -51,7 +51,7 @@ const Configuracion = ({
       <div className="bg-white p-6 rounded-lg border border-gray-200">
         <div className="flex justify-between items-center mb-2">
           <h2 className="text-lg font-semibold text-gray-700">
-            Monto de Cuota por Mes — Año {anioActual}
+            Monto de Cuota por Mes — Año {anioSeleccionado}
           </h2>
           {!editandoMontos ? (
             <button

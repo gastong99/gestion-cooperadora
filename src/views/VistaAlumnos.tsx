@@ -15,7 +15,7 @@ type Props = Pick<AppContext,
   | 'setAlumnosInactivos'
   | 'familias'
   | 'pagos'
-  | 'anioActual'
+  | 'anioSeleccionado'
   | 'toast'
   | 'confirmar'
   | 'cargarDatos'
@@ -50,7 +50,7 @@ const VistaAlumnos = ({
   setAlumnosInactivos,
   familias,
   pagos,
-  anioActual,
+  anioSeleccionado,
   toast,
   confirmar,
   cargarDatos,
@@ -308,14 +308,14 @@ const VistaAlumnos = ({
               <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Grupo</th>
               <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Teléfono</th>
               <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Familia</th>
-              <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Pagos {anioActual}</th>
+              <th className="px-6 py-3 text-left text-sm font-semibold text-gray-700">Pagos {anioSeleccionado}</th>
               <th className="px-6 py-3 text-right text-sm font-semibold text-gray-700">Acciones</th>
             </tr>
           </thead>
           <tbody className="divide-y divide-gray-200">
             {alumnosFiltrados.map(alumno => {
               const grupo        = grupos.find(g => g.id === alumno.grupo_id);
-              const cantPagos    = pagos.filter(p => p.alumno_id === alumno.id && p.anio === anioActual).length;
+              const cantPagos    = pagos.filter(p => p.alumno_id === alumno.id && p.anio === anioSeleccionado).length;
               const estaEditando = editandoId === alumno.id;
 
               return (

@@ -25,3 +25,5 @@ dist-ssr
 
 release/
 out/
+Comprobantes/
+dist-electron/

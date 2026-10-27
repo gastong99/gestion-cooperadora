@@ -12,21 +12,23 @@ export type Vista =
   | 'configuracion';
 
 export const useApp = () => {
-  const [vistaActual,      setVistaActual]      = useState<Vista>('dashboard');
-  const [grupos,           setGrupos]           = useState<Grupo[]>([]);
-  const [alumnos,          setAlumnos]          = useState<Alumno[]>([]);
-  const [pagos,            setPagos]            = useState<Pago[]>([]);
-  const [montos,           setMontos]           = useState<ConfiguracionMonto[]>([]);
-  const [familias,         setFamilias]         = useState<Familia[]>([]);
-  const [gruposInactivos,  setGruposInactivos]  = useState<Grupo[]>([]);
-  const [alumnosInactivos, setAlumnosInactivos] = useState<Alumno[]>([]);
+  const [vistaActual,       setVistaActual]      = useState<Vista>('dashboard');
+  const [grupos,            setGrupos]           = useState<Grupo[]>([]);
+  const [alumnos,           setAlumnos]          = useState<Alumno[]>([]);
+  const [pagos,             setPagos]            = useState<Pago[]>([]);
+  const [montos,            setMontos]           = useState<ConfiguracionMonto[]>([]);
+  const [familias,          setFamilias]         = useState<Familia[]>([]);
+  const [gruposInactivos,   setGruposInactivos]  = useState<Grupo[]>([]);
+  const [alumnosInactivos,  setAlumnosInactivos] = useState<Alumno[]>([]);
   const [grupoSeleccionado, setGrupoSeleccionado] = useState<number | null>(null);
-  const [editandoMontos,   setEditandoMontos]   = useState(false);
-  const [generandoPDF,     setGenerandoPDF]     = useState<number | null>(null);
-  const [toasts,           setToasts]           = useState<ToastItem[]>([]);
-  const [modalConfig,      setModalConfig]      = useState<ModalConfirmConfig | null>(null);
+  const [editandoMontos,    setEditandoMontos]   = useState(false);
+  const [generandoPDF,      setGenerandoPDF]     = useState<number | null>(null);
+  const [toasts,            setToasts]           = useState<ToastItem[]>([]);
+  const [modalConfig,       setModalConfig]      = useState<ModalConfirmConfig | null>(null);
 
-  const anioActual = 2026;
+  // Año seleccionado — arranca en el año actual, se puede cambiar
+  const anioActual = new Date().getFullYear();
+  const [anioSeleccionado, setAnioSeleccionado] = useState(anioActual);
 
   // ── Toast ──────────────────────────────────────────────────────────────────
   const toast = useCallback((mensaje: string, tipo: ToastTipo = 'exito') => {
@@ -42,7 +44,17 @@ export const useApp = () => {
   const confirmar = (config: ModalConfirmConfig) => setModalConfig(config);
   const cerrarModal = () => setModalConfig(null);
 
-  // ── Carga de datos ─────────────────────────────────────────────────────────
+  // ── Carga de pagos por año ─────────────────────────────────────────────────
+  const cargarPagos = useCallback(async () => {
+    try {
+      const pagosData = await window.electronAPI.getPagos();
+      setPagos(pagosData);
+    } catch (error) {
+      console.error('Error al cargar pagos:', error);
+    }
+  }, []);
+
+  // ── Carga completa de datos ────────────────────────────────────────────────
   const cargarDatos = useCallback(async () => {
     try {
       const [
@@ -57,7 +69,7 @@ export const useApp = () => {
         window.electronAPI.getGrupos(),
         window.electronAPI.getAlumnos(),
         window.electronAPI.getPagos(),
-        window.electronAPI.getMontos(anioActual),
+        window.electronAPI.getMontos(anioSeleccionado),
         window.electronAPI.getGruposInactivos(),
         window.electronAPI.getAlumnosInactivos(),
         window.electronAPI.getFamilias(),
@@ -76,13 +88,15 @@ export const useApp = () => {
       console.error('Error al cargar datos:', error);
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [anioSeleccionado]);
 
   useEffect(() => { cargarDatos(); }, [cargarDatos]);
 
   // ── Helpers de pagos ───────────────────────────────────────────────────────
-  const getPago = (alumnoId: number, mes: string): Pago | undefined =>
-    pagos.find(p => p.alumno_id === alumnoId && p.mes === mes && p.anio === anioActual);
+  const getPago = (alumnoId: number, mes: string, anio?: number): Pago | undefined =>
+    pagos.find(
+      p => p.alumno_id === alumnoId && p.mes === mes && p.anio === (anio ?? anioSeleccionado)
+    );
 
   const getMontoPorMes = (mes: string): number =>
     montos.find(m => m.mes === mes)?.monto ?? 5000;
@@ -98,6 +112,7 @@ export const useApp = () => {
         onConfirmar: async () => {
           try {
             await window.electronAPI.deletePago(pagoExistente.id);
+            // Actualización local — sin recargar, sin perder scroll
             setPagos(prev => prev.filter(p => p.id !== pagoExistente.id));
             toast('Pago desmarcado correctamente');
           } catch (error) {
@@ -110,8 +125,9 @@ export const useApp = () => {
       try {
         const montoMes  = getMontoPorMes(mes);
         const nuevoPago = await window.electronAPI.createPago({
-          alumno_id: alumnoId, mes, anio: anioActual, monto: montoMes,
+          alumno_id: alumnoId, mes, anio: anioSeleccionado, monto: montoMes,
         });
+        // Actualización local — sin recargar, sin perder scroll
         setPagos(prev => [...prev, nuevoPago]);
         setGenerandoPDF(alumnoId);
         const pdfResult = await window.electronAPI.generarComprobante(nuevoPago.id);
@@ -135,11 +151,17 @@ export const useApp = () => {
     const totalAlumnos    = alumnos.filter(a => a.activo === 1).length;
     const mesActual       = new Date().toLocaleString('es-AR', { month: 'long' });
     const mesCapitalizado = mesActual.charAt(0).toUpperCase() + mesActual.slice(1);
-    const pagosMesActual  = pagos.filter(p => p.mes === mesCapitalizado && p.anio === anioActual).length;
-    const totalRecaudado  = pagos.filter(p => p.anio === anioActual).reduce((sum, p) => sum + p.monto, 0);
+    const pagosMesActual  = pagos.filter(
+      p => p.mes === mesCapitalizado && p.anio === anioSeleccionado
+    ).length;
+    const totalRecaudado  = pagos
+      .filter(p => p.anio === anioSeleccionado)
+      .reduce((sum, p) => sum + p.monto, 0);
     const alumnosConDeuda = alumnos.filter(a => {
       if (a.activo !== 1) return false;
-      return !pagos.some(p => p.alumno_id === a.id && p.mes === mesCapitalizado && p.anio === anioActual);
+      return !pagos.some(
+        p => p.alumno_id === a.id && p.mes === mesCapitalizado && p.anio === anioSeleccionado
+      );
     }).length;
     return { totalAlumnos, pagosMesActual, mesCapitalizado, totalRecaudado, alumnosConDeuda };
   };
@@ -148,23 +170,26 @@ export const useApp = () => {
     // Navegación
     vistaActual, setVistaActual,
     // Estado
-    grupos,          setGrupos,
-    alumnos,         setAlumnos,
-    pagos,           setPagos,
-    montos,          setMontos,
-    familias,        setFamilias,
-    gruposInactivos, setGruposInactivos,
-    alumnosInactivos,setAlumnosInactivos,
+    grupos,           setGrupos,
+    alumnos,          setAlumnos,
+    pagos,            setPagos,
+    montos,           setMontos,
+    familias,         setFamilias,
+    gruposInactivos,  setGruposInactivos,
+    alumnosInactivos, setAlumnosInactivos,
     grupoSeleccionado,
-    editandoMontos,  setEditandoMontos,
+    editandoMontos,   setEditandoMontos,
     generandoPDF,
+    // Año
     anioActual,
+    anioSeleccionado, setAnioSeleccionado,
     // Toasts
     toasts, toast, quitarToast,
     // Modal
     modalConfig, confirmar, cerrarModal,
     // Helpers
     cargarDatos,
+    cargarPagos,
     getPago,
     getMontoPorMes,
     togglePago,
